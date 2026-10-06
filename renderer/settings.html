@@ -1,0 +1,463 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>TypeWheel</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<style>
+  :root {
+    --ink: #141a2b;
+    --ink-2: #1b2338;
+    --frost: 236, 242, 255;
+    --text: #e9eefb;
+    --muted: #93a0bf;
+    --line: rgba(236, 242, 255, .1);
+    --accent: #8fb8ff;
+    --accent-rgb: 143, 184, 255;
+    --danger: #ff8f9b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background:
+      radial-gradient(900px 500px at 12% -10%, rgba(var(--accent-rgb), .16), transparent 60%),
+      radial-gradient(700px 500px at 110% 110%, rgba(150, 120, 255, .10), transparent 60%),
+      var(--ink);
+    color: var(--text);
+    font: 14px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    display: grid; grid-template-rows: 1fr auto;
+  }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .layout {
+    display: grid; grid-template-columns: 320px 1fr; gap: 28px;
+    padding: 28px 32px 24px; overflow: auto; min-height: 0;
+  }
+  aside { display: flex; flex-direction: column; gap: 22px; }
+  h1 { font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif; font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -.01em; }
+  h2 { font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif; font-size: 15px; font-weight: 600; margin: 0 0 10px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12.5px; }
+
+  .glass {
+    background: rgba(var(--frost), .045);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 18px;
+    backdrop-filter: blur(20px);
+  }
+
+  /* Live preview */
+  .preview { display: grid; place-items: center; padding: 18px 0 6px; position: relative; }
+  .preview svg { width: 260px; height: 260px; overflow: visible; }
+  .preview .p-slice path { fill: rgba(var(--frost), .05); stroke: rgba(var(--frost), .14); transition: fill .12s, stroke .12s; }
+  .preview .p-slice.on path { fill: rgba(var(--accent-rgb), .38); stroke: var(--accent); }
+  .preview text { fill: var(--text); font-size: 11px; font-weight: 600; text-anchor: middle; dominant-baseline: middle; }
+  .preview .p-ico { font-size: 18px; }
+  .preview .hub { fill: rgba(var(--frost), .07); stroke: rgba(var(--frost), .16); }
+
+  /* Shortcut recorder */
+  .rec {
+    width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap;
+    min-height: 58px; padding: 10px; border-radius: 12px; cursor: pointer;
+    background: rgba(0, 0, 0, .2); border: 1px dashed rgba(var(--frost), .22);
+    transition: border-color .15s, background .15s;
+  }
+  .rec:hover { border-color: rgba(var(--accent-rgb), .6); }
+  .rec.live { border-style: solid; border-color: var(--accent); background: rgba(var(--accent-rgb), .08); }
+  .rec .plus { color: var(--muted); }
+  kbd {
+    display: inline-block; min-width: 34px; padding: 6px 10px; border-radius: 8px; text-align: center;
+    font: 600 13px "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    background: linear-gradient(180deg, rgba(var(--frost), .16), rgba(var(--frost), .06));
+    border: 1px solid rgba(var(--frost), .2); border-bottom-width: 3px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+  }
+  .rec.live kbd { border-color: rgba(var(--accent-rgb), .7); }
+
+  /* Controls */
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+  .row + .row { border-top: 1px solid var(--line); }
+  .swatches { display: flex; gap: 6px; align-items: center; }
+  .sw {
+    width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25);
+  }
+  .sw.on { border-color: #fff; }
+  .sw.custom { position: relative; overflow: hidden; background: conic-gradient(#ff8f9b, #ffd38f, #9ff0b8, #8fe3ff, #a99bff, #ff8f9b); }
+  .sw.custom input { position: absolute; inset: -6px; opacity: 0; cursor: pointer; }
+  .seg { display: inline-flex; background: rgba(0, 0, 0, .22); border-radius: 10px; padding: 3px; border: 1px solid var(--line); }
+  .seg button { border: 0; background: none; padding: 4px 12px; border-radius: 7px; cursor: pointer; color: var(--muted); }
+  .seg button.on { background: rgba(var(--frost), .14); color: var(--text); }
+  .switch { position: relative; width: 40px; height: 22px; flex: none; }
+  .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; z-index: 1; }
+  .switch span { position: absolute; inset: 0; border-radius: 22px; background: rgba(var(--frost), .14); transition: background .15s; }
+  .switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::after { transform: translateX(18px); }
+  .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Slices */
+  .head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+  .list { display: flex; flex-direction: column; gap: 10px; }
+  .item {
+    display: grid; grid-template-columns: 30px 52px 1fr auto; gap: 10px; align-items: start;
+    padding: 12px; border-radius: 14px; background: rgba(var(--frost), .04); border: 1px solid var(--line);
+    transition: border-color .12s, background .12s;
+  }
+  .item.focus { border-color: rgba(var(--accent-rgb), .55); background: rgba(var(--accent-rgb), .06); }
+  .item .n {
+    width: 26px; height: 26px; margin-top: 7px; border-radius: 50%; display: grid; place-items: center;
+    font-size: 12px; font-weight: 600; background: rgba(var(--frost), .08); color: var(--muted);
+  }
+  .item.focus .n { background: var(--accent); color: #0d1424; }
+  .field {
+    width: 100%; background: rgba(0, 0, 0, .22); border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px 10px; outline: none; transition: border-color .12s;
+  }
+  .field:focus { border-color: rgba(var(--accent-rgb), .7); }
+  .ico-in { text-align: center; font-size: 20px; padding: 5px 0; height: 40px; }
+  .stack { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  textarea.field { resize: vertical; min-height: 58px; line-height: 1.4; }
+  .opts { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); }
+  .opts .switch { width: 34px; height: 19px; }
+  .opts .switch span::after { width: 13px; height: 13px; }
+  .opts .switch input:checked + span::after { transform: translateX(15px); }
+  .tools { display: flex; flex-direction: column; gap: 4px; }
+  .icon-btn {
+    width: 30px; height: 28px; border-radius: 8px; border: 1px solid transparent; background: none;
+    color: var(--muted); cursor: pointer; display: grid; place-items: center;
+  }
+  .icon-btn:hover:not(:disabled) { background: rgba(var(--frost), .08); color: var(--text); }
+  .icon-btn.del:hover:not(:disabled) { color: var(--danger); }
+  .icon-btn:disabled { opacity: .3; cursor: default; }
+  .icon-btn svg { width: 15px; height: 15px; }
+
+  .btn {
+    border: 1px solid var(--line); background: rgba(var(--frost), .07); border-radius: 10px;
+    padding: 8px 14px; cursor: pointer; transition: background .12s, border-color .12s;
+  }
+  .btn:hover:not(:disabled) { background: rgba(var(--frost), .12); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn.primary { background: var(--accent); border-color: transparent; color: #0d1424; font-weight: 600; }
+  .btn.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+  .add { width: 100%; border-style: dashed; padding: 12px; color: var(--muted); }
+
+  .try textarea { width: 100%; min-height: 70px; }
+  code { font-family: inherit; font-weight: 600; background: rgba(var(--frost), .08); padding: 1px 6px; border-radius: 6px; }
+
+  footer {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 14px 32px; border-top: 1px solid var(--line); background: rgba(10, 14, 26, .55); backdrop-filter: blur(16px);
+  }
+  #status { font-size: 13px; color: var(--muted); }
+  #status.err { color: var(--danger); }
+  #status.ok { color: #9ff0b8; }
+  .actions { display: flex; gap: 10px; }
+
+  @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <div>
+      <h1>TypeWheel</h1>
+      <div class="muted small" id="engineNote">Runs in your tray. Press your shortcut anywhere to open the wheel.</div>
+    </div>
+
+    <div class="glass preview" aria-hidden="true"><svg id="pv" viewBox="-130 -130 260 260"></svg></div>
+
+    <section class="glass">
+      <h2>Shortcut</h2>
+      <button class="rec" id="rec" type="button" aria-label="Change shortcut"></button>
+      <div class="muted small" id="recHint" style="margin-top:8px">Click, then press the keys you want. Esc cancels.</div>
+    </section>
+
+    <section class="glass">
+      <h2>Look</h2>
+      <div class="row">
+        <span>Accent</span>
+        <div class="swatches" id="swatches"></div>
+      </div>
+      <div class="row">
+        <span>Wheel size</span>
+        <div class="seg" id="size">
+          <button type="button" data-v="s">Small</button><button type="button" data-v="m">Medium</button><button type="button" data-v="l">Large</button>
+        </div>
+      </div>
+      <div class="row">
+        <label for="blur">Blur the screen behind the wheel</label>
+        <span class="switch"><input type="checkbox" id="blur"><span></span></span>
+      </div>
+    </section>
+
+    <section class="glass">
+      <div class="row" style="padding:0">
+        <label for="startup">Start with Windows</label>
+        <span class="switch"><input type="checkbox" id="startup"><span></span></span>
+      </div>
+    </section>
+  </aside>
+
+  <main>
+    <div class="head">
+      <div>
+        <h2 style="margin:0 0 2px">Slices</h2>
+        <div class="muted small">Up to 8. Slice 1 sits at the top and the rest go clockwise. Press a slice's number while the wheel is open to pick it instantly.</div>
+      </div>
+    </div>
+    <div class="list" id="list"></div>
+    <button class="btn add" id="add" type="button" style="margin-top:10px">Add slice</button>
+    <p class="muted small" style="margin:12px 2px 22px">
+      You can use <code>{date}</code>, <code>{time}</code> and <code>{clipboard}</code> in the text. They're filled in when the slice is typed.
+    </p>
+
+    <section class="glass try">
+      <h2>Try it</h2>
+      <textarea class="field" placeholder="Save your changes, click in here, then press your shortcut."></textarea>
+    </section>
+  </main>
+</div>
+
+<footer>
+  <span id="status"></span>
+  <div class="actions">
+    <button class="btn" id="revert" type="button">Discard changes</button>
+    <button class="btn primary" id="save" type="button">Save changes</button>
+  </div>
+</footer>
+
+<script>
+  const MAX = 8, MIN = 2;
+  const ACCENTS = ['#8fb8ff', '#8fe3ff', '#a99bff', '#ff9ccf', '#ffc98f', '#9ff0b8'];
+  const $ = (s) => document.querySelector(s);
+  let draft, saved, recording = false, focusIdx = -1, uid = 0;
+
+  const ICONS = {
+    up: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10l4-4 4 4"/></svg>',
+    down: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>',
+    del: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5"/></svg>',
+  };
+
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+  const strip = (c) => ({ ...c, presets: c.presets.map(({ _id, ...p }) => p) });
+  const dirty = () => JSON.stringify(strip(draft)) !== JSON.stringify(strip(saved));
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`; }
+  function applyAccent(hex) {
+    document.documentElement.style.setProperty('--accent', hex);
+    document.documentElement.style.setProperty('--accent-rgb', hexToRgb(hex));
+  }
+
+  // ---------- status ----------
+  let statusTimer;
+  function status(msg, kind = '') {
+    const el = $('#status');
+    el.textContent = msg; el.className = kind;
+    clearTimeout(statusTimer);
+    if (kind === 'ok') statusTimer = setTimeout(refreshStatus, 2200);
+  }
+  function refreshStatus() {
+    $('#save').disabled = !dirty();
+    $('#revert').disabled = !dirty();
+    if ($('#status').classList.contains('err') && dirty()) return;
+    status(dirty() ? 'You have unsaved changes.' : '');
+  }
+  const changed = () => { renderPreview(); refreshStatus(); };
+
+  // ---------- preview ----------
+  const pt = (rad, a) => [rad * Math.sin(a), -rad * Math.cos(a)];
+  function slicePath(R, r, a0, a1, gap) {
+    const go = gap / R, gi = gap / r, large = a1 - a0 > Math.PI ? 1 : 0;
+    const [x1, y1] = pt(R, a0 + go), [x2, y2] = pt(R, a1 - go), [x3, y3] = pt(r, a1 - gi), [x4, y4] = pt(r, a0 + gi);
+    return `M${x1} ${y1}A${R} ${R} 0 ${large} 1 ${x2} ${y2}L${x3} ${y3}A${r} ${r} 0 ${large} 0 ${x4} ${y4}Z`;
+  }
+  function renderPreview() {
+    const R = 124, r = 48, ps = draft.presets, n = Math.max(ps.length, 1), step = (Math.PI * 2) / n;
+    let h = '';
+    ps.forEach((p, i) => {
+      const mid = i * step;
+      const [lx, ly] = pt((R + r) / 2 + 2, mid);
+      h += `<g class="p-slice${i === focusIdx ? ' on' : ''}"><path d="${slicePath(R, r, mid - step / 2, mid + step / 2, 2.5)}"/>`;
+      if (p.icon) h += `<text class="p-ico" x="${lx}" y="${ly - 8}">${esc(p.icon)}</text>`;
+      const lbl = (p.label || p.text || '').slice(0, 11);
+      h += `<text x="${lx}" y="${p.icon ? ly + 12 : ly}">${esc(lbl)}</text></g>`;
+    });
+    h += `<circle class="hub" r="${r - 6}"/>`;
+    $('#pv').innerHTML = h;
+  }
+
+  // ---------- shortcut recorder ----------
+  function keycaps(acc) {
+    return acc.split('+').map((k) => `<kbd>${esc(k === 'Super' ? 'Win' : k)}</kbd>`).join('<span class="plus">+</span>');
+  }
+  function renderRec() {
+    const b = $('#rec');
+    b.classList.toggle('live', recording);
+    b.innerHTML = recording ? '<span class="muted">Press your shortcut…</span>' : keycaps(draft.hotkey);
+  }
+  function codeToKey(code) {
+    if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+    if (/^Digit\d$/.test(code)) return code.slice(5);
+    if (/^F([1-9]|1\d|2[0-4])$/.test(code)) return code;
+    if (/^Numpad\d$/.test(code)) return 'num' + code.slice(6);
+    return ({
+      Space: 'Space', Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\',
+      Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', Tab: 'Tab', Enter: 'Enter', Backspace: 'Backspace',
+      Delete: 'Delete', Insert: 'Insert', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+      ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+      NumpadAdd: 'numadd', NumpadSubtract: 'numsub', NumpadMultiply: 'nummult', NumpadDivide: 'numdiv', NumpadDecimal: 'numdec',
+    })[code] || null;
+  }
+  function startRec() { recording = true; tw.suspendHotkey(); renderRec(); $('#recHint').textContent = 'Hold your modifiers and press a key. Esc cancels.'; }
+  function stopRec(acc) {
+    recording = false; tw.resumeHotkey();
+    if (acc) { draft.hotkey = acc; changed(); }
+    renderRec();
+    $('#recHint').textContent = 'Click, then press the keys you want. Esc cancels.';
+  }
+  $('#rec').addEventListener('click', () => (recording ? stopRec(null) : startRec()));
+  window.addEventListener('keydown', (e) => {
+    if (!recording) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
+      return;
+    }
+    e.preventDefault(); e.stopPropagation();
+    const plain = !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey;
+    if (e.key === 'Escape' && plain) return stopRec(null);
+    const key = codeToKey(e.code);
+    if (!key) return; // only a modifier so far
+    const mods = [];
+    if (e.ctrlKey) mods.push('Ctrl');
+    if (e.altKey) mods.push('Alt');
+    if (e.shiftKey) mods.push('Shift');
+    if (e.metaKey) mods.push('Super');
+    if (!mods.length && !/^F\d+$/.test(key)) {
+      $('#recHint').textContent = 'Add Ctrl, Alt, Shift or Win so normal typing doesn’t trigger it.';
+      return;
+    }
+    stopRec([...mods, key].join('+'));
+  }, true);
+  window.addEventListener('blur', () => { if (recording) stopRec(null); });
+
+  // ---------- look ----------
+  function renderLook() {
+    const custom = !ACCENTS.includes(draft.accent);
+    $('#swatches').innerHTML =
+      ACCENTS.map((c) => `<button type="button" class="sw${c === draft.accent ? ' on' : ''}" style="background:${c}" data-c="${c}" aria-label="Accent ${c}"></button>`).join('') +
+      `<label class="sw custom${custom ? ' on' : ''}" aria-label="Custom accent"${custom ? ` style="background:${draft.accent}"` : ''}><input type="color" value="${draft.accent}"></label>`;
+    document.querySelectorAll('#size button').forEach((b) => b.classList.toggle('on', b.dataset.v === draft.size));
+    $('#blur').checked = !!draft.blurBackground;
+    $('#startup').checked = !!draft.startWithWindows;
+    applyAccent(draft.accent);
+  }
+  $('#swatches').addEventListener('click', (e) => {
+    const b = e.target.closest('.sw[data-c]');
+    if (!b) return;
+    draft.accent = b.dataset.c; renderLook(); changed();
+  });
+  $('#swatches').addEventListener('input', (e) => {
+    if (e.target.type !== 'color') return;
+    draft.accent = e.target.value; applyAccent(draft.accent);
+    const lab = e.target.parentElement; lab.style.background = draft.accent;
+    document.querySelectorAll('.sw').forEach((s) => s.classList.toggle('on', s === lab));
+    changed();
+  });
+  $('#size').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    draft.size = b.dataset.v; renderLook(); changed();
+  });
+  $('#blur').addEventListener('change', (e) => { draft.blurBackground = e.target.checked; changed(); });
+  $('#startup').addEventListener('change', (e) => { draft.startWithWindows = e.target.checked; changed(); });
+
+  // ---------- slices ----------
+  function renderList() {
+    const ps = draft.presets;
+    $('#list').innerHTML = ps.map((p, i) => `
+      <div class="item${i === focusIdx ? ' focus' : ''}" data-i="${i}">
+        <div class="n">${i + 1}</div>
+        <input class="field ico-in" data-k="icon" value="${esc(p.icon)}" placeholder="＋" maxlength="8" aria-label="Icon for slice ${i + 1}" title="Emoji (Win + . opens the emoji picker)">
+        <div class="stack">
+          <input class="field" data-k="label" value="${esc(p.label)}" placeholder="Label on the wheel" maxlength="40" aria-label="Label for slice ${i + 1}">
+          <textarea class="field" data-k="text" rows="2" placeholder="Text to type" aria-label="Text for slice ${i + 1}">${esc(p.text)}</textarea>
+          <label class="opts"><span class="switch"><input type="checkbox" data-k="pressEnter"${p.pressEnter ? ' checked' : ''}><span></span></span>Press Enter after typing</label>
+        </div>
+        <div class="tools">
+          <button class="icon-btn" type="button" data-act="up" ${i === 0 ? 'disabled' : ''} aria-label="Move up">${ICONS.up}</button>
+          <button class="icon-btn" type="button" data-act="down" ${i === ps.length - 1 ? 'disabled' : ''} aria-label="Move down">${ICONS.down}</button>
+          <button class="icon-btn del" type="button" data-act="del" ${ps.length <= MIN ? 'disabled' : ''} aria-label="Delete slice">${ICONS.del}</button>
+        </div>
+      </div>`).join('');
+    $('#add').disabled = ps.length >= MAX;
+    $('#add').textContent = ps.length >= MAX ? 'The wheel is full (8 slices)' : 'Add slice';
+  }
+  function setFocus(i) {
+    if (i === focusIdx) return;
+    focusIdx = i;
+    document.querySelectorAll('.item').forEach((el) => el.classList.toggle('focus', +el.dataset.i === i));
+    renderPreview();
+  }
+  $('#list').addEventListener('input', (e) => {
+    const item = e.target.closest('.item'); const k = e.target.dataset.k;
+    if (!item || !k) return;
+    const p = draft.presets[+item.dataset.i];
+    p[k] = k === 'pressEnter' ? e.target.checked : e.target.value;
+    changed();
+  });
+  $('#list').addEventListener('focusin', (e) => { const item = e.target.closest('.item'); if (item) setFocus(+item.dataset.i); });
+  $('#list').addEventListener('mouseover', (e) => { const item = e.target.closest('.item'); if (item) setFocus(+item.dataset.i); });
+  $('#list').addEventListener('mouseleave', () => { if (!document.activeElement?.closest('.item')) setFocus(-1); });
+  $('#list').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]'); if (!b) return;
+    const i = +b.closest('.item').dataset.i, ps = draft.presets;
+    if (b.dataset.act === 'up' && i > 0) { [ps[i - 1], ps[i]] = [ps[i], ps[i - 1]]; focusIdx = i - 1; }
+    if (b.dataset.act === 'down' && i < ps.length - 1) { [ps[i + 1], ps[i]] = [ps[i], ps[i + 1]]; focusIdx = i + 1; }
+    if (b.dataset.act === 'del' && ps.length > MIN) { ps.splice(i, 1); focusIdx = -1; }
+    renderList(); changed();
+  });
+  $('#add').addEventListener('click', () => {
+    if (draft.presets.length >= MAX) return;
+    draft.presets.push({ _id: ++uid, icon: '', label: '', text: '', pressEnter: false });
+    focusIdx = draft.presets.length - 1;
+    renderList(); changed();
+    document.querySelector(`.item[data-i="${focusIdx}"] [data-k="label"]`)?.focus();
+  });
+
+  // ---------- save ----------
+  async function save() {
+    if (!dirty()) return;
+    const empty = draft.presets.findIndex((p) => !p.text);
+    if (empty >= 0 && draft.presets.filter((p) => p.text).length < MIN) {
+      return status(`Add text to at least ${MIN} slices.`, 'err');
+    }
+    if (empty >= 0) return status(`Slice ${empty + 1} has no text. Add some or delete it.`, 'err');
+    $('#save').disabled = true;
+    const res = await tw.saveConfig(strip(draft));
+    if (!res.ok) { status(res.error, 'err'); $('#save').disabled = false; return; }
+    load(res.cfg);
+    status('Saved. Your shortcut is live.', 'ok');
+  }
+  $('#save').addEventListener('click', save);
+  $('#revert').addEventListener('click', () => { load(saved); status('Changes discarded.'); });
+
+  function load(cfg) {
+    saved = clone(cfg);
+    saved.presets.forEach((p) => (p._id = ++uid));
+    draft = clone(saved);
+    renderRec(); renderLook(); renderList(); renderPreview(); refreshStatus();
+  }
+
+  (async () => {
+    load(await tw.getConfig());
+    const info = await tw.info();
+    if (info.engine !== 'native') {
+      $('#engineNote').textContent = 'Runs in your tray. Using the backup typing method, so picks may feel a little slower.';
+    }
+  })();
+</script>
+</body>
+</html>

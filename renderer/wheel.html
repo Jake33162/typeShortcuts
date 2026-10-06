@@ -1,0 +1,294 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<style>
+  :root {
+    --accent: #8fb8ff;
+    --accent-rgb: 143, 184, 255;
+    --R: 210px;   /* outer radius */
+    --r: 84px;    /* inner radius */
+    --cx: 50vw;
+    --cy: 50vh;
+    --frost: 236, 242, 255;
+  }
+  html, body {
+    margin: 0; width: 100%; height: 100%; overflow: hidden;
+    background: transparent; cursor: none; user-select: none;
+    font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    color: rgb(var(--frost));
+    -webkit-font-smoothing: antialiased;
+  }
+  body.instant * { transition: none !important; }
+
+  /* The screen behind, softly blurred and dimmed */
+  #bg {
+    position: fixed; inset: -48px;
+    background-size: cover; background-position: center;
+    filter: blur(9px) saturate(1.25) brightness(.55);
+    opacity: 0; transition: opacity .16s ease;
+  }
+  #dim {
+    position: fixed; inset: 0;
+    background: radial-gradient(circle at var(--cx) var(--cy), rgba(8,12,24,.05) 0, rgba(8,12,24,.35) calc(var(--R) * 1.6), rgba(4,6,12,.6) 100%);
+    opacity: 0; transition: opacity .16s ease;
+  }
+  body.nobg #dim { background: radial-gradient(circle at var(--cx) var(--cy), rgba(8,12,24,.25) 0, rgba(4,6,12,.55) 100%); }
+  body.open #bg, body.open #dim { opacity: 1; }
+
+  #wheel {
+    position: fixed; left: var(--cx); top: var(--cy);
+    width: calc(var(--R) * 2); height: calc(var(--R) * 2);
+    transform: translate(-50%, -50%) scale(.86);
+    opacity: 0;
+    transition: transform .2s cubic-bezier(.2, .9, .25, 1.15), opacity .12s ease;
+  }
+  body.open #wheel { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+
+  /* Frosted ring: a heavier blur than the background gives the glass its depth */
+  #glass {
+    position: absolute; inset: 0; border-radius: 50%;
+    backdrop-filter: blur(26px) saturate(1.7) brightness(1.08);
+    background:
+      radial-gradient(circle at 50% 0%, rgba(var(--frost), .16), transparent 55%),
+      rgba(var(--frost), .06);
+    -webkit-mask: radial-gradient(circle, transparent calc(var(--r) - 1px), #000 var(--r));
+            mask: radial-gradient(circle, transparent calc(var(--r) - 1px), #000 var(--r));
+    box-shadow: 0 30px 80px rgba(0,0,0,.45);
+  }
+  #rim {
+    position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+    box-shadow: inset 0 0 0 1px rgba(var(--frost), .22), inset 0 1px 0 rgba(var(--frost), .35);
+  }
+
+  svg#slices { position: absolute; inset: 0; overflow: visible; }
+  .slice path {
+    fill: rgba(var(--frost), .045);
+    stroke: rgba(var(--frost), .18);
+    stroke-width: 1;
+    transition: fill .12s ease, stroke .12s ease;
+  }
+  .slice { transition: transform .16s cubic-bezier(.2, .9, .3, 1.2); }
+  .slice.on path {
+    fill: url(#hot);
+    stroke: rgba(var(--accent-rgb), .9);
+  }
+
+  .label {
+    position: absolute; left: 50%; top: 50%;
+    width: 112px; margin-left: -56px; margin-top: -30px; height: 60px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    pointer-events: none; text-align: center;
+    transition: transform .16s cubic-bezier(.2, .9, .3, 1.2);
+  }
+  .label .ico { font-size: 26px; line-height: 1; filter: drop-shadow(0 2px 6px rgba(0,0,0,.35)); transition: transform .16s ease; }
+  .label .txt {
+    font-size: 13px; font-weight: 600; letter-spacing: .01em;
+    max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    color: rgba(var(--frost), .78); text-shadow: 0 1px 8px rgba(0,0,0,.4);
+  }
+  .label.on .txt { color: #fff; }
+  .label.on .ico { transform: scale(1.14); }
+  .label .num {
+    position: absolute; top: -10px; font-size: 10px; font-weight: 600;
+    color: rgba(var(--frost), .38);
+  }
+  .label.noicon .txt { font-size: 14px; }
+
+  /* Center hub */
+  #hub {
+    position: absolute; left: 50%; top: 50%;
+    width: calc(var(--r) * 2 - 14px); height: calc(var(--r) * 2 - 14px);
+    transform: translate(-50%, -50%); border-radius: 50%;
+    backdrop-filter: blur(30px) saturate(1.6);
+    background: radial-gradient(circle at 50% 30%, rgba(var(--frost), .14), rgba(var(--frost), .04) 70%);
+    box-shadow: inset 0 0 0 1px rgba(var(--frost), .18), inset 0 1px 0 rgba(var(--frost), .3);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 18px; box-sizing: border-box; text-align: center; gap: 3px;
+  }
+  #hub .h-title { font-family: "Segoe UI Variable Display", "Segoe UI", sans-serif; font-weight: 600; font-size: 14px; line-height: 1.2; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #hub .h-sub {
+    font-size: 11px; line-height: 1.35; color: rgba(var(--frost), .6);
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+    white-space: pre-line; word-break: break-word;
+  }
+  body.sz-s #hub .h-sub { -webkit-line-clamp: 2; }
+
+  /* Direction pointer on the inner edge */
+  #pointer {
+    position: absolute; left: 50%; top: 50%; width: 0; height: 0;
+    opacity: 0; transition: opacity .1s ease;
+  }
+  #pointer.on { opacity: 1; }
+  #pointer i {
+    position: absolute; left: -7px; top: calc(-1 * var(--r) + 1px);
+    width: 0; height: 0;
+    border-left: 7px solid transparent; border-right: 7px solid transparent;
+    border-bottom: 8px solid var(--accent);
+    filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), .9));
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #wheel, .slice, .label, #bg, #dim { transition-duration: 0s !important; }
+  }
+</style>
+</head>
+<body class="instant">
+  <div id="bg"></div>
+  <div id="dim"></div>
+  <div id="wheel">
+    <div id="glass"></div>
+    <svg id="slices"></svg>
+    <div id="labels"></div>
+    <div id="rim"></div>
+    <div id="pointer"><i></i></div>
+    <div id="hub"><div class="h-title"></div><div class="h-sub"></div></div>
+  </div>
+
+<script>
+  const SIZES = { s: [170, 68], m: [210, 84], l: [252, 102] };
+  const TAU = Math.PI * 2;
+  const $ = (s) => document.querySelector(s);
+  const body = document.body;
+  let st = null;
+
+  const pt = (rad, a) => [rad * Math.sin(a), -rad * Math.cos(a)]; // 0 = up, clockwise
+
+  function hexToRgb(h) {
+    const n = parseInt(h.slice(1), 16);
+    return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+  }
+
+  function slicePath(R, r, a0, a1, gap) {
+    const go = gap / R, gi = gap / r;
+    const large = a1 - a0 > Math.PI ? 1 : 0;
+    const [x1, y1] = pt(R, a0 + go), [x2, y2] = pt(R, a1 - go);
+    const [x3, y3] = pt(r, a1 - gi), [x4, y4] = pt(r, a0 + gi);
+    return `M${x1} ${y1}A${R} ${R} 0 ${large} 1 ${x2} ${y2}L${x3} ${y3}A${r} ${r} 0 ${large} 0 ${x4} ${y4}Z`;
+  }
+
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function build(d) {
+    const [R, r] = SIZES[d.size] || SIZES.m;
+    const n = d.presets.length;
+    const step = TAU / n;
+    const margin = 28;
+    const cx = Math.min(Math.max(d.cursor.x, R + margin), d.width - R - margin);
+    const cy = Math.min(Math.max(d.cursor.y, R + margin), d.height - R - margin);
+
+    st = { ...d, R, r, n, step, start: { ...d.cursor }, hovered: -1, dead: Math.max(22, r * 0.4), offsets: [] };
+
+    const root = document.documentElement.style;
+    root.setProperty('--R', R + 'px');
+    root.setProperty('--r', r + 'px');
+    root.setProperty('--cx', cx + 'px');
+    root.setProperty('--cy', cy + 'px');
+    root.setProperty('--accent', d.accent);
+    root.setProperty('--accent-rgb', hexToRgb(d.accent));
+    body.className = `instant sz-${d.size}` + (d.background ? '' : ' nobg');
+    $('#bg').style.backgroundImage = d.background ? `url(${d.background})` : 'none';
+
+    const svg = $('#slices');
+    svg.setAttribute('viewBox', `${-R} ${-R} ${2 * R} ${2 * R}`);
+    svg.setAttribute('width', 2 * R);
+    svg.setAttribute('height', 2 * R);
+    let html = `<defs><radialGradient id="hot" cx="0" cy="0" r="${R}" gradientUnits="userSpaceOnUse">
+        <stop offset="${(r / R).toFixed(3)}" stop-color="${d.accent}" stop-opacity=".18"/>
+        <stop offset="1" stop-color="${d.accent}" stop-opacity=".46"/></radialGradient></defs>`;
+    let labels = '';
+    const labelRad = (R + r) / 2 + 4;
+
+    d.presets.forEach((p, i) => {
+      const mid = i * step;
+      const a0 = mid - step / 2, a1 = mid + step / 2;
+      const [lx, ly] = pt(labelRad, mid);
+      const [ox, oy] = pt(7, mid);
+      st.offsets.push([ox, oy, lx, ly]);
+      html += `<g class="slice" data-i="${i}"><path d="${slicePath(R, r, a0, a1, 3)}"/></g>`;
+      labels += `<div class="label${p.icon ? '' : ' noicon'}" data-i="${i}" style="transform:translate(${lx}px,${ly}px)">
+          ${n <= 9 ? `<span class="num">${i + 1}</span>` : ''}
+          ${p.icon ? `<span class="ico">${esc(p.icon)}</span>` : ''}
+          <span class="txt">${esc(p.label)}</span></div>`;
+    });
+    svg.innerHTML = html;
+    $('#labels').innerHTML = labels;
+    $('#pointer').classList.remove('on');
+    setHub(-1);
+  }
+
+  function setHub(i) {
+    const t = $('#hub .h-title'), s = $('#hub .h-sub');
+    if (i < 0) {
+      t.textContent = 'Pick a slice';
+      s.textContent = 'Click to type it\nEsc to close';
+    } else {
+      const p = st.presets[i];
+      t.textContent = `${p.icon ? p.icon + ' ' : ''}${p.label}`;
+      s.textContent = p.preview.replace(/\{date\}/g, 'today’s date').replace(/\{time\}/g, 'current time').replace(/\{clipboard\}/g, 'clipboard');
+    }
+  }
+
+  function setHover(i) {
+    if (!st || i === st.hovered) return;
+    const prev = st.hovered;
+    st.hovered = i;
+    if (prev >= 0) {
+      const g = document.querySelector(`.slice[data-i="${prev}"]`);
+      const l = document.querySelector(`.label[data-i="${prev}"]`);
+      const [, , lx, ly] = st.offsets[prev];
+      g && (g.classList.remove('on'), (g.style.transform = ''));
+      l && (l.classList.remove('on'), (l.style.transform = `translate(${lx}px,${ly}px)`));
+    }
+    if (i >= 0) {
+      const [ox, oy, lx, ly] = st.offsets[i];
+      const g = document.querySelector(`.slice[data-i="${i}"]`);
+      const l = document.querySelector(`.label[data-i="${i}"]`);
+      g.classList.add('on'); g.style.transform = `translate(${ox}px,${oy}px)`;
+      l.classList.add('on'); l.style.transform = `translate(${lx + ox}px,${ly + oy}px)`;
+    }
+    setHub(i);
+    tw.hover(i);
+  }
+
+  // Direction is measured from where the cursor was when the wheel opened,
+  // so a quick flick works even if the wheel had to shift away from a screen edge.
+  window.addEventListener('mousemove', (e) => {
+    if (!st) return;
+    const dx = e.clientX - st.start.x, dy = e.clientY - st.start.y;
+    const dist = Math.hypot(dx, dy);
+    const ptr = $('#pointer');
+    if (dist < st.dead) { ptr.classList.remove('on'); setHover(-1); return; }
+    let ang = Math.atan2(dx, -dy);
+    if (ang < 0) ang += TAU;
+    ptr.classList.add('on');
+    ptr.style.transform = `rotate(${ang}rad)`;
+    setHover(Math.floor(((ang + st.step / 2) % TAU) / st.step));
+  });
+
+  window.addEventListener('mousedown', (e) => {
+    if (!st) return;
+    if (e.button === 0 && st.hovered >= 0) tw.select(st.hovered);
+    else tw.cancel();
+  });
+  window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  tw.onOpen((d) => {
+    build(d);
+    // Two frames: one to lay out the closed state, one to make sure it's painted.
+    requestAnimationFrame(() => requestAnimationFrame(() => tw.ready()));
+  });
+  tw.onShown(() => {
+    body.classList.remove('instant');
+    void body.offsetWidth;
+    body.classList.add('open');
+  });
+  tw.onClose(() => {
+    body.classList.add('instant');
+    body.classList.remove('open');
+    st = null;
+  });
+</script>
+</body>
+</html>
