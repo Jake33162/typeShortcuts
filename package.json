@@ -1,7 +1,7 @@
 {
   "name": "typewheel",
   "productName": "TypeWheel",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Radial quick-text wheel for Windows",
   "author": "Jacob Abramson",
   "license": "UNLICENSED",
@@ -11,7 +11,8 @@
     "dist": "electron-builder --win --publish never"
   },
   "dependencies": {
-    "koffi": "^2.9.0"
+    "koffi": "^2.9.0",
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "electron": "^35.0.0",
@@ -45,6 +46,14 @@
     },
     "portable": {
       "artifactName": "TypeWheel-Portable-${version}.exe"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Jake33162",
+        "repo": "typeShortcuts",
+        "releaseType": "release"
+      }
+    ]
   }
 }

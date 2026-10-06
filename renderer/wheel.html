@@ -24,27 +24,37 @@
 
   /* The screen behind, softly blurred and dimmed */
   #bg {
-    position: fixed; inset: -48px;
+    position: fixed; inset: -24px;
     background-size: cover; background-position: center;
-    filter: blur(9px) saturate(1.25) brightness(.55);
-    opacity: 0; transition: opacity .16s ease;
+    filter: blur(4px) saturate(1.1) brightness(.72);
+    opacity: 0; transition: opacity .25s ease;
   }
   #dim {
     position: fixed; inset: 0;
-    background: radial-gradient(circle at var(--cx) var(--cy), rgba(8,12,24,.05) 0, rgba(8,12,24,.35) calc(var(--R) * 1.6), rgba(4,6,12,.6) 100%);
-    opacity: 0; transition: opacity .16s ease;
+    background: radial-gradient(circle at var(--cx) var(--cy), rgba(8,12,24,.08) 0, rgba(8,12,24,.22) calc(var(--R) * 1.6), rgba(4,6,12,.4) 100%);
+    opacity: 0; transition: opacity .2s ease;
   }
-  body.nobg #dim { background: radial-gradient(circle at var(--cx) var(--cy), rgba(8,12,24,.25) 0, rgba(4,6,12,.55) 100%); }
-  body.open #bg, body.open #dim { opacity: 1; }
+  body.open #dim { opacity: 1; }
+  body.open.bg-on #bg { opacity: 1; }
+  body.dismiss #bg, body.dismiss #dim { opacity: 0; transition-duration: .13s; }
 
+  /* Entrance: the wheel grows in from small and out of focus, settling with a slight overshoot */
   #wheel {
     position: fixed; left: var(--cx); top: var(--cy);
     width: calc(var(--R) * 2); height: calc(var(--R) * 2);
-    transform: translate(-50%, -50%) scale(.86);
+    transform: translate(-50%, -50%) scale(.45) rotate(-12deg);
     opacity: 0;
-    transition: transform .2s cubic-bezier(.2, .9, .25, 1.15), opacity .12s ease;
+    filter: blur(16px);
+    transition:
+      transform .34s cubic-bezier(.16, 1.2, .3, 1),
+      opacity .16s ease,
+      filter .3s cubic-bezier(.2, .7, .3, 1);
   }
-  body.open #wheel { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  body.open #wheel { transform: translate(-50%, -50%) scale(1) rotate(0deg); opacity: 1; filter: none; }
+  body.dismiss #wheel {
+    transform: translate(-50%, -50%) scale(.82); opacity: 0; filter: blur(8px);
+    transition: transform .13s ease-in, opacity .13s ease-in, filter .13s ease-in;
+  }
 
   /* Frosted ring: a heavier blur than the background gives the glass its depth */
   #glass {
@@ -80,8 +90,11 @@
     width: 112px; margin-left: -56px; margin-top: -30px; height: 60px;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
     pointer-events: none; text-align: center;
-    transition: transform .16s cubic-bezier(.2, .9, .3, 1.2);
+    opacity: 0;
+    transition: transform .16s cubic-bezier(.2, .9, .3, 1.2), opacity .2s ease;
   }
+  body.open .label { opacity: 1; transition-delay: 0s, var(--d, 0s); }
+  body.open .label.on { transition-delay: 0s, 0s; }
   .label .ico { font-size: 26px; line-height: 1; filter: drop-shadow(0 2px 6px rgba(0,0,0,.35)); transition: transform .16s ease; }
   .label .txt {
     font-size: 13px; font-weight: 600; letter-spacing: .01em;
@@ -130,7 +143,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    #wheel, .slice, .label, #bg, #dim { transition-duration: 0s !important; }
+    #wheel, .slice, .label, #bg, #dim { transition-duration: 0s !important; transition-delay: 0s !important; }
   }
 </style>
 </head>
@@ -187,8 +200,8 @@
     root.setProperty('--cy', cy + 'px');
     root.setProperty('--accent', d.accent);
     root.setProperty('--accent-rgb', hexToRgb(d.accent));
-    body.className = `instant sz-${d.size}` + (d.background ? '' : ' nobg');
-    $('#bg').style.backgroundImage = d.background ? `url(${d.background})` : 'none';
+    body.className = `instant sz-${d.size}`;
+    $('#bg').style.backgroundImage = 'none';
 
     const svg = $('#slices');
     svg.setAttribute('viewBox', `${-R} ${-R} ${2 * R} ${2 * R}`);
@@ -207,7 +220,7 @@
       const [ox, oy] = pt(7, mid);
       st.offsets.push([ox, oy, lx, ly]);
       html += `<g class="slice" data-i="${i}"><path d="${slicePath(R, r, a0, a1, 3)}"/></g>`;
-      labels += `<div class="label${p.icon ? '' : ' noicon'}" data-i="${i}" style="transform:translate(${lx}px,${ly}px)">
+      labels += `<div class="label${p.icon ? '' : ' noicon'}" data-i="${i}" style="transform:translate(${lx}px,${ly}px);--d:${90 + i * 28}ms">
           ${n <= 9 ? `<span class="num">${i + 1}</span>` : ''}
           ${p.icon ? `<span class="ico">${esc(p.icon)}</span>` : ''}
           <span class="txt">${esc(p.label)}</span></div>`;
@@ -222,7 +235,7 @@
     const t = $('#hub .h-title'), s = $('#hub .h-sub');
     if (i < 0) {
       t.textContent = 'Pick a slice';
-      s.textContent = 'Click to type it\nEsc to close';
+      s.textContent = 'Click a slice to type it\nRight-click to close';
     } else {
       const p = st.presets[i];
       t.textContent = `${p.icon ? p.icon + ' ' : ''}${p.label}`;
@@ -254,39 +267,52 @@
 
   // Direction is measured from where the cursor was when the wheel opened,
   // so a quick flick works even if the wheel had to shift away from a screen edge.
-  window.addEventListener('mousemove', (e) => {
-    if (!st) return;
-    const dx = e.clientX - st.start.x, dy = e.clientY - st.start.y;
-    const dist = Math.hypot(dx, dy);
+  function track(x, y) {
+    const dx = x - st.start.x, dy = y - st.start.y;
     const ptr = $('#pointer');
-    if (dist < st.dead) { ptr.classList.remove('on'); setHover(-1); return; }
+    if (Math.hypot(dx, dy) < st.dead) { ptr.classList.remove('on'); setHover(-1); return; }
     let ang = Math.atan2(dx, -dy);
     if (ang < 0) ang += TAU;
     ptr.classList.add('on');
     ptr.style.transform = `rotate(${ang}rad)`;
     setHover(Math.floor(((ang + st.step / 2) % TAU) / st.step));
-  });
+  }
 
+  window.addEventListener('mousemove', (e) => { if (st && !st.closing) track(e.clientX, e.clientY); });
+
+  // Left click types the slice you're pointing at (clicking the center does nothing).
+  // Right click closes the wheel.
   window.addEventListener('mousedown', (e) => {
-    if (!st) return;
-    if (e.button === 0 && st.hovered >= 0) tw.select(st.hovered);
-    else tw.cancel();
+    if (!st || st.closing) return;
+    if (e.button === 2) { st.closing = true; tw.cancel(); return; }
+    if (e.button === 0) {
+      track(e.clientX, e.clientY);
+      if (st.hovered >= 0) { st.closing = true; tw.select(st.hovered); }
+    }
   });
   window.addEventListener('contextmenu', (e) => e.preventDefault());
 
   tw.onOpen((d) => {
     build(d);
-    // Two frames: one to lay out the closed state, one to make sure it's painted.
-    requestAnimationFrame(() => requestAnimationFrame(() => tw.ready()));
+    requestAnimationFrame(() => tw.ready());
   });
   tw.onShown(() => {
     body.classList.remove('instant');
-    void body.offsetWidth;
+    void body.offsetWidth; // commit the start state so the entrance animates
     body.classList.add('open');
   });
+  tw.onBackground((img) => {
+    if (!st) return;
+    $('#bg').style.backgroundImage = `url(${img})`;
+    body.classList.add('bg-on');
+  });
+  tw.onDismiss(() => {
+    if (st) st.closing = true;
+    body.classList.add('dismiss');
+  });
   tw.onClose(() => {
-    body.classList.add('instant');
-    body.classList.remove('open');
+    body.className = 'instant';
+    $('#bg').style.backgroundImage = 'none';
     st = null;
   });
 </script>

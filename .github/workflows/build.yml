@@ -1,9 +1,10 @@
-name: Build Windows app
+name: Build and release
 
+# Every push to main builds a new version and publishes it as a GitHub Release.
+# Installed copies of TypeWheel check those releases and update themselves.
 on:
   push:
     branches: [main]
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -22,9 +23,19 @@ jobs:
       - name: Install
         run: npm install
 
-      - name: Build installer + portable exe
-        run: npx electron-builder --win --publish never
+      # Version = major.minor from package.json + this run's number, e.g. 1.1.14.
+      # Bump major/minor in package.json yourself when you want; the patch counts up on its own.
+      - name: Set version
+        shell: bash
+        run: |
+          BASE=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
+          npm version "$BASE.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+          echo "Building v$BASE.${{ github.run_number }}"
+
+      - name: Build and publish release
+        run: npx electron-builder --win --publish always
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload build
@@ -33,9 +44,3 @@ jobs:
           name: TypeWheel-windows
           path: dist/*.exe
           if-no-files-found: error
-
-      - name: Attach to release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*.exe

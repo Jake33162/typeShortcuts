@@ -199,6 +199,10 @@
         <label for="startup">Start with Windows</label>
         <span class="switch"><input type="checkbox" id="startup"><span></span></span>
       </div>
+      <div class="row" id="updRow" style="padding:10px 0 0;margin-top:10px">
+        <span class="small"><span id="ver"></span> <span class="muted" id="updText"></span></span>
+        <button class="btn" id="updBtn" type="button" style="padding:5px 12px" hidden></button>
+      </div>
     </section>
   </aside>
 
@@ -451,9 +455,31 @@
     renderRec(); renderLook(); renderList(); renderPreview(); refreshStatus();
   }
 
+  // ---------- updates ----------
+  function renderUpdate(u) {
+    const text = $('#updText'), btn = $('#updBtn');
+    btn.hidden = true;
+    const map = {
+      unsupported: 'Updates install automatically in the Setup version.',
+      checking: 'Checking for updates…',
+      current: 'Up to date.',
+      downloading: `Downloading v${u.version}…`,
+      ready: `v${u.version} is ready.`,
+      error: 'Couldn’t check for updates.',
+      idle: '',
+    };
+    text.textContent = map[u.status] ?? '';
+    text.title = u.error || '';
+    if (u.status === 'ready') { btn.hidden = false; btn.textContent = 'Restart to update'; btn.onclick = () => tw.installUpdate(); }
+    else if (u.status === 'current' || u.status === 'error' || u.status === 'idle') { btn.hidden = false; btn.textContent = 'Check now'; btn.onclick = () => tw.checkUpdate(); }
+  }
+  tw.onUpdate(renderUpdate);
+
   (async () => {
     load(await tw.getConfig());
     const info = await tw.info();
+    $('#ver').textContent = `Version ${info.version}.`;
+    renderUpdate(info.update);
     if (info.engine !== 'native') {
       $('#engineNote').textContent = 'Runs in your tray. Using the backup typing method, so picks may feel a little slower.';
     }

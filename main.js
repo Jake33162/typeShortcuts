@@ -2,6 +2,7 @@ const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, screen, desktop
 const path = require('path');
 const config = require('./lib/config');
 const typer = require('./lib/typer');
+const updater = require('./lib/updater');
 
 if (!app.requestSingleInstanceLock()) app.exit(0);
 
@@ -17,6 +18,8 @@ let paused = false;
 let wheelState = 'closed'; // closed | opening | open
 let hovered = -1;
 let showTimer = null;
+let hideTimer = null;
+let openSeq = 0;
 const wheelKeys = [];
 
 // ---------- startup ----------
@@ -30,6 +33,11 @@ app.whenReady().then(() => {
     console.warn(`Hotkey ${cfg.hotkey} is taken`);
     openSettings();
   }
+  updater.init((u) => {
+    buildTrayMenu();
+    if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send('update:state', u);
+  });
+
   if (!cfg.firstRunDone) {
     cfg = config.save({ ...cfg, firstRunDone: true });
     openSettings();
@@ -57,7 +65,7 @@ function registerHotkey(acc) {
 function onHotkey() {
   if (wheelState === 'open') {
     if (hovered >= 0) selectPreset(hovered);
-    else hideWheel();
+    else hideWheel(true);
     return;
   }
   if (wheelState === 'closed') openWheel();
@@ -68,7 +76,7 @@ function registerWheelKeys() {
   const add = (acc, fn) => {
     try { if (globalShortcut.register(acc, fn)) wheelKeys.push(acc); } catch {}
   };
-  add('Escape', hideWheel);
+  add('Escape', () => hideWheel(true));
   cfg.presets.forEach((_, i) => add(String(i + 1), () => selectPreset(i)));
 }
 
@@ -97,14 +105,19 @@ function createWheelWindow() {
     webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true, backgroundThrottling: false },
   });
   wheelWin.setAlwaysOnTop(true, 'screen-saver');
+  // Keeps the overlay out of screen captures. That lets us grab the desktop for
+  // the blurred background *after* the wheel is already showing, so it opens instantly.
+  // Side effect: the wheel also won't appear in OBS or screen recordings.
+  wheelWin.setContentProtection(true);
   wheelWin.loadFile(path.join(__dirname, 'renderer', 'wheel.html'));
   wheelWin.on('close', (e) => {
     if (!app.isQuitting) { e.preventDefault(); hideWheel(); }
   });
 }
 
-async function openWheel() {
+function openWheel() {
   if (!cfg.presets.length || !wheelWin) return;
+  const seq = ++openSeq;
   wheelState = 'opening';
   hovered = -1;
 
@@ -112,38 +125,43 @@ async function openWheel() {
   const display = screen.getDisplayNearestPoint(cursor);
   const b = display.bounds;
 
-  // Grab a small screenshot of this monitor before the overlay appears.
-  // It gets blurred in the overlay, so a third of full resolution is plenty.
-  let background = null;
-  if (cfg.blurBackground) {
-    try {
-      const sources = await desktopCapturer.getSources({
-        types: ['screen'],
-        thumbnailSize: { width: Math.round(b.width / 3), height: Math.round(b.height / 3) },
-      });
-      const src = sources.find((s) => String(s.display_id) === String(display.id)) || sources[0];
-      if (src && !src.thumbnail.isEmpty()) {
-        background = 'data:image/jpeg;base64,' + src.thumbnail.toJPEG(72).toString('base64');
-      }
-    } catch (e) {
-      console.warn('screen capture failed', e.message);
-    }
-  }
-  if (wheelState !== 'opening') return;
-
   wheelWin.setBounds(b);
   wheelWin.webContents.send('wheel:open', {
     presets: cfg.presets.map((p) => ({ icon: p.icon, label: p.label, preview: p.text })),
     accent: cfg.accent,
     size: cfg.size,
-    background,
     cursor: { x: cursor.x - b.x, y: cursor.y - b.y },
     width: b.width,
     height: b.height,
   });
-  // Show once the renderer has painted the new wheel (or after a short fallback).
+  // Show as soon as the renderer has laid out the wheel (or after a short fallback).
   clearTimeout(showTimer);
-  showTimer = setTimeout(showWheelNow, 150);
+  showTimer = setTimeout(showWheelNow, 50);
+
+  // The blurred background loads in parallel and fades in when it's ready.
+  if (cfg.blurBackground) {
+    captureBackground(display, b).then((bg) => {
+      if (bg && seq === openSeq && (wheelState === 'open' || wheelState === 'opening')) {
+        wheelWin.webContents.send('wheel:bg', bg);
+      }
+    });
+  }
+}
+
+async function captureBackground(display, b) {
+  try {
+    // It gets blurred anyway, so a quarter of full resolution is plenty and keeps it fast.
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: Math.round(b.width / 4), height: Math.round(b.height / 4) },
+    });
+    const src = sources.find((s) => String(s.display_id) === String(display.id)) || sources[0];
+    if (!src || src.thumbnail.isEmpty()) return null;
+    return 'data:image/jpeg;base64,' + src.thumbnail.toJPEG(70).toString('base64');
+  } catch (e) {
+    console.warn('screen capture failed', e.message);
+    return null;
+  }
 }
 
 function showWheelNow() {
@@ -157,15 +175,30 @@ function showWheelNow() {
   wheelWin.webContents.send('wheel:shown');
 }
 
-function hideWheel() {
+// animate = true plays the shrink-away animation (cancel). Picking a slice hides
+// instantly so the text gets typed without waiting.
+function hideWheel(animate = false) {
   clearTimeout(showTimer);
+  clearTimeout(hideTimer);
   unregisterWheelKeys();
-  wheelState = 'closed';
   hovered = -1;
-  if (wheelWin && !wheelWin.isDestroyed()) {
-    wheelWin.webContents.send('wheel:close');
-    wheelWin.hide();
+  openSeq++;
+  if (!wheelWin || wheelWin.isDestroyed()) { wheelState = 'closed'; return; }
+  if (animate && wheelState === 'open') {
+    wheelState = 'closing';
+    wheelWin.webContents.send('wheel:dismiss');
+    hideTimer = setTimeout(finishHide, 140);
+  } else {
+    finishHide();
   }
+}
+
+function finishHide() {
+  clearTimeout(hideTimer);
+  wheelState = 'closed';
+  if (!wheelWin || wheelWin.isDestroyed()) return;
+  wheelWin.webContents.send('wheel:close');
+  wheelWin.hide();
 }
 
 function selectPreset(i) {
@@ -177,7 +210,7 @@ function selectPreset(i) {
 ipcMain.on('wheel:ready', () => showWheelNow());
 ipcMain.on('wheel:hover', (_e, i) => { hovered = Number.isInteger(i) ? i : -1; });
 ipcMain.on('wheel:select', (_e, i) => { if (wheelState === 'open') selectPreset(i); });
-ipcMain.on('wheel:cancel', () => hideWheel());
+ipcMain.on('wheel:cancel', () => hideWheel(true));
 ipcMain.on('wheel:test', () => setTimeout(() => { if (wheelState === 'closed') openWheel(); }, 250));
 
 // ---------- start with Windows ----------
@@ -202,6 +235,7 @@ function buildTrayMenu() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: `Shortcut: ${prettyHotkey(cfg.hotkey)}`, enabled: false },
+      ...updateMenuItems(),
       { type: 'separator' },
       { label: 'Settings…', click: openSettings },
       { label: 'Preview wheel', click: () => setTimeout(openWheel, 200) },
@@ -217,6 +251,15 @@ function buildTrayMenu() {
       { label: 'Quit TypeWheel', click: () => { app.isQuitting = true; app.quit(); } },
     ])
   );
+}
+
+function updateMenuItems() {
+  const u = updater.getState();
+  if (u.status === 'unsupported') return [];
+  if (u.status === 'ready') return [{ label: `Restart to update (v${u.version})`, click: () => updater.install() }];
+  if (u.status === 'downloading') return [{ label: `Downloading v${u.version}…`, enabled: false }];
+  if (u.status === 'checking') return [{ label: 'Checking for updates…', enabled: false }];
+  return [{ label: 'Check for updates', click: () => updater.check() }];
 }
 
 const prettyHotkey = (acc) => acc.replace(/Super/g, 'Win');
@@ -274,4 +317,6 @@ ipcMain.on('hotkey:suspend', () => {
   if (currentHotkey) { try { globalShortcut.unregister(currentHotkey); } catch {} currentHotkey = null; }
 });
 ipcMain.on('hotkey:resume', () => registerHotkey(cfg.hotkey));
-ipcMain.handle('app:info', () => ({ version: app.getVersion(), engine: typer.engine, paused }));
+ipcMain.handle('app:info', () => ({ version: app.getVersion(), engine: typer.engine, paused, update: updater.getState() }));
+ipcMain.on('update:check', () => updater.check());
+ipcMain.on('update:install', () => updater.install());
