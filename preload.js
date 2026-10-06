@@ -5,10 +5,10 @@ contextBridge.exposeInMainWorld('tw', {
   onOpen: (cb) => ipcRenderer.on('wheel:open', (_e, d) => cb(d)),
   onShown: (cb) => ipcRenderer.on('wheel:shown', () => cb()),
   onBackground: (cb) => ipcRenderer.on('wheel:bg', (_e, img) => cb(img)),
+  onTrack: (cb) => ipcRenderer.on('wheel:track', (_e, t) => cb(t)),
   onDismiss: (cb) => ipcRenderer.on('wheel:dismiss', () => cb()),
   onClose: (cb) => ipcRenderer.on('wheel:close', () => cb()),
   ready: () => ipcRenderer.send('wheel:ready'),
-  hover: (i) => ipcRenderer.send('wheel:hover', i),
   select: (i) => ipcRenderer.send('wheel:select', i),
   cancel: () => ipcRenderer.send('wheel:cancel'),
 

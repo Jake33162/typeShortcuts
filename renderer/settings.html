@@ -210,7 +210,7 @@
     <div class="head">
       <div>
         <h2 style="margin:0 0 2px">Slices</h2>
-        <div class="muted small">Up to 8. Slice 1 sits at the top and the rest go clockwise. Press a slice's number while the wheel is open to pick it instantly.</div>
+        <div class="muted small">Up to 10. The first slice sits at the top and the rest go clockwise. While the wheel is open, press a slice's number key to type it instantly (1–9, then 0 for the tenth).</div>
       </div>
     </div>
     <div class="list" id="list"></div>
@@ -235,7 +235,8 @@
 </footer>
 
 <script>
-  const MAX = 8, MIN = 2;
+  const MAX = 10, MIN = 2;
+  const slotKey = (i) => (i < 9 ? i + 1 : 0);
   const ACCENTS = ['#8fb8ff', '#8fe3ff', '#a99bff', '#ff9ccf', '#ffc98f', '#9ff0b8'];
   const $ = (s) => document.querySelector(s);
   let draft, saved, recording = false, focusIdx = -1, uid = 0;
@@ -383,11 +384,11 @@
     const ps = draft.presets;
     $('#list').innerHTML = ps.map((p, i) => `
       <div class="item${i === focusIdx ? ' focus' : ''}" data-i="${i}">
-        <div class="n">${i + 1}</div>
-        <input class="field ico-in" data-k="icon" value="${esc(p.icon)}" placeholder="＋" maxlength="8" aria-label="Icon for slice ${i + 1}" title="Emoji (Win + . opens the emoji picker)">
+        <div class="n">${slotKey(i)}</div>
+        <input class="field ico-in" data-k="icon" value="${esc(p.icon)}" placeholder="＋" maxlength="8" aria-label="Icon for slice ${slotKey(i)}" title="Emoji (Win + . opens the emoji picker)">
         <div class="stack">
-          <input class="field" data-k="label" value="${esc(p.label)}" placeholder="Label on the wheel" maxlength="40" aria-label="Label for slice ${i + 1}">
-          <textarea class="field" data-k="text" rows="2" placeholder="Text to type" aria-label="Text for slice ${i + 1}">${esc(p.text)}</textarea>
+          <input class="field" data-k="label" value="${esc(p.label)}" placeholder="Label on the wheel" maxlength="40" aria-label="Label for slice ${slotKey(i)}">
+          <textarea class="field" data-k="text" rows="2" placeholder="Text to type" aria-label="Text for slice ${slotKey(i)}">${esc(p.text)}</textarea>
           <label class="opts"><span class="switch"><input type="checkbox" data-k="pressEnter"${p.pressEnter ? ' checked' : ''}><span></span></span>Press Enter after typing</label>
         </div>
         <div class="tools">
@@ -397,7 +398,7 @@
         </div>
       </div>`).join('');
     $('#add').disabled = ps.length >= MAX;
-    $('#add').textContent = ps.length >= MAX ? 'The wheel is full (8 slices)' : 'Add slice';
+    $('#add').textContent = ps.length >= MAX ? 'The wheel is full (10 slices)' : 'Add slice';
   }
   function setFocus(i) {
     if (i === focusIdx) return;
@@ -438,7 +439,7 @@
     if (empty >= 0 && draft.presets.filter((p) => p.text).length < MIN) {
       return status(`Add text to at least ${MIN} slices.`, 'err');
     }
-    if (empty >= 0) return status(`Slice ${empty + 1} has no text. Add some or delete it.`, 'err');
+    if (empty >= 0) return status(`Slice ${slotKey(empty)} has no text. Add some or delete it.`, 'err');
     $('#save').disabled = true;
     const res = await tw.saveConfig(strip(draft));
     if (!res.ok) { status(res.error, 'err'); $('#save').disabled = false; return; }

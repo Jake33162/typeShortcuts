@@ -1,8 +1,9 @@
-const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, screen, desktopCapturer, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, globalShortcut, ipcMain, screen, desktopCapturer, nativeImage, shell } = require('electron');
 const path = require('path');
 const config = require('./lib/config');
 const typer = require('./lib/typer');
 const updater = require('./lib/updater');
+const { log, file: logFile } = require('./lib/log');
 
 if (!app.requestSingleInstanceLock()) app.exit(0);
 
@@ -20,12 +21,17 @@ let hovered = -1;
 let showTimer = null;
 let hideTimer = null;
 let openSeq = 0;
+let pollTimer = null;
+let openCtx = null;
+const TAU = Math.PI * 2;
+const SIZES = { s: [170, 68], m: [210, 84], l: [252, 102] }; // must match wheel.html
 const wheelKeys = [];
 
 // ---------- startup ----------
 app.whenReady().then(() => {
   app.setAppUserModelId('com.jabramson.typewheel');
   cfg = config.load();
+  log(`start v${app.getVersion()} typing=${typer.engine}${typer.loadError ? ' (' + typer.loadError + ')' : ''} hotkey=${cfg.hotkey}`);
   createTray();
   createWheelWindow();
 
@@ -59,6 +65,7 @@ function registerHotkey(acc) {
   let ok = false;
   try { ok = globalShortcut.register(acc, onHotkey); } catch { ok = false; }
   if (ok) currentHotkey = acc;
+  log(`register hotkey ${acc}: ${ok ? 'ok' : 'FAILED'}`);
   return ok;
 }
 
@@ -73,11 +80,21 @@ function onHotkey() {
 
 // Escape and number keys only exist while the wheel is up.
 function registerWheelKeys() {
+  const failed = [];
   const add = (acc, fn) => {
-    try { if (globalShortcut.register(acc, fn)) wheelKeys.push(acc); } catch {}
+    let ok = false;
+    try { ok = globalShortcut.register(acc, fn); } catch {}
+    if (ok) wheelKeys.push(acc); else failed.push(acc);
   };
   add('Escape', () => hideWheel(true));
-  cfg.presets.forEach((_, i) => add(String(i + 1), () => selectPreset(i)));
+  // Slices 1–9 use keys 1–9 and slice 10 uses 0, matching the keyboard's number row.
+  // Numpad digits work too.
+  cfg.presets.forEach((_, i) => {
+    const d = slotKey(i);
+    add(d, () => selectPreset(i));
+    add('num' + d, () => selectPreset(i));
+  });
+  if (failed.length) log('could not register wheel keys:', failed.join(' '));
 }
 
 function unregisterWheelKeys() {
@@ -124,6 +141,9 @@ function openWheel() {
   const cursor = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursor);
   const b = display.bounds;
+  const n = cfg.presets.length;
+  const [, r] = SIZES[cfg.size] || SIZES.m;
+  openCtx = { start: cursor, n, step: TAU / n, dead: Math.max(22, r * 0.4), lastAng: null, btn: typer.mouseButtons() };
 
   wheelWin.setBounds(b);
   wheelWin.webContents.send('wheel:open', {
@@ -173,6 +193,36 @@ function showWheelNow() {
   wheelState = 'open';
   registerWheelKeys();
   wheelWin.webContents.send('wheel:shown');
+  clearInterval(pollTimer);
+  pollTimer = setInterval(poll, 12);
+  log('wheel open');
+}
+
+// Hover and clicks are tracked here from the real cursor and mouse buttons,
+// instead of relying on the overlay window receiving mouse events.
+// Direction is measured from where the cursor was when the wheel opened.
+function poll() {
+  if (wheelState !== 'open' || !openCtx) return;
+  const p = screen.getCursorScreenPoint();
+  const dx = p.x - openCtx.start.x, dy = p.y - openCtx.start.y;
+  let i = -1, ang = null;
+  if (Math.hypot(dx, dy) >= openCtx.dead) {
+    ang = Math.atan2(dx, -dy);
+    if (ang < 0) ang += TAU;
+    i = Math.floor(((ang + openCtx.step / 2) % TAU) / openCtx.step);
+  }
+  if (i !== hovered || (ang !== null && (openCtx.lastAng === null || Math.abs(ang - openCtx.lastAng) > 0.01))) {
+    hovered = i;
+    openCtx.lastAng = ang;
+    wheelWin.webContents.send('wheel:track', { i, ang });
+  }
+
+  const btn = typer.mouseButtons();
+  if (!btn) return;
+  const prev = openCtx.btn || { left: false, right: false };
+  openCtx.btn = btn;
+  if (btn.right && !prev.right) return hideWheel(true);
+  if (btn.left && !prev.left && hovered >= 0) return selectPreset(hovered);
 }
 
 // animate = true plays the shrink-away animation (cancel). Picking a slice hides
@@ -180,9 +230,11 @@ function showWheelNow() {
 function hideWheel(animate = false) {
   clearTimeout(showTimer);
   clearTimeout(hideTimer);
+  clearInterval(pollTimer);
   unregisterWheelKeys();
   hovered = -1;
   openSeq++;
+  openCtx = null;
   if (!wheelWin || wheelWin.isDestroyed()) { wheelState = 'closed'; return; }
   if (animate && wheelState === 'open') {
     wheelState = 'closing';
@@ -202,14 +254,18 @@ function finishHide() {
 }
 
 function selectPreset(i) {
+  if (wheelState !== 'open') return;
   const p = cfg.presets[i];
   hideWheel();
-  if (p) typer.typeText(p.text, { pressEnter: p.pressEnter }).catch((e) => console.error('type failed', e));
+  if (!p) return;
+  log(`select slice ${i + 1} (${p.label})`);
+  typer.typeText(p.text, { pressEnter: p.pressEnter }).then(() => log('typed ok')).catch((e) => log('type failed', e));
 }
 
+const slotKey = (i) => (i < 9 ? String(i + 1) : '0');
+
 ipcMain.on('wheel:ready', () => showWheelNow());
-ipcMain.on('wheel:hover', (_e, i) => { hovered = Number.isInteger(i) ? i : -1; });
-ipcMain.on('wheel:select', (_e, i) => { if (wheelState === 'open') selectPreset(i); });
+ipcMain.on('wheel:select', (_e, i) => { if (wheelState === 'open' && Number.isInteger(i)) selectPreset(i); });
 ipcMain.on('wheel:cancel', () => hideWheel(true));
 ipcMain.on('wheel:test', () => setTimeout(() => { if (wheelState === 'closed') openWheel(); }, 250));
 
@@ -247,6 +303,7 @@ function buildTrayMenu() {
         click: (m) => { paused = m.checked; registerHotkey(cfg.hotkey); buildTrayMenu(); },
       },
       { label: 'Start with Windows', type: 'checkbox', checked: getStartup(), click: (m) => setStartup(m.checked) },
+      { label: 'Open log file', click: () => shell.openPath(logFile()) },
       { type: 'separator' },
       { label: 'Quit TypeWheel', click: () => { app.isQuitting = true; app.quit(); } },
     ])

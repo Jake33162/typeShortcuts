@@ -87,7 +87,7 @@
 
   .label {
     position: absolute; left: 50%; top: 50%;
-    width: 112px; margin-left: -56px; margin-top: -30px; height: 60px;
+    width: var(--lw, 112px); margin-left: calc(var(--lw, 112px) / -2); margin-top: -30px; height: 60px;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
     pointer-events: none; text-align: center;
     opacity: 0;
@@ -104,10 +104,15 @@
   .label.on .txt { color: #fff; }
   .label.on .ico { transform: scale(1.14); }
   .label .num {
-    position: absolute; top: -10px; font-size: 10px; font-weight: 600;
-    color: rgba(var(--frost), .38);
+    position: absolute; top: -12px; min-width: 16px; height: 16px; line-height: 16px; border-radius: 8px;
+    font-size: 10.5px; font-weight: 700; text-align: center;
+    color: rgba(var(--frost), .75); background: rgba(var(--frost), .12);
+    box-shadow: inset 0 0 0 1px rgba(var(--frost), .18);
   }
+  .label.on .num { background: var(--accent); color: #0d1424; box-shadow: none; }
   .label.noicon .txt { font-size: 14px; }
+  body.dense .label .ico { font-size: 22px; }
+  body.dense .label .txt { font-size: 12px; }
 
   /* Center hub */
   #hub {
@@ -200,7 +205,7 @@
     root.setProperty('--cy', cy + 'px');
     root.setProperty('--accent', d.accent);
     root.setProperty('--accent-rgb', hexToRgb(d.accent));
-    body.className = `instant sz-${d.size}`;
+    body.className = `instant sz-${d.size}` + (n > 8 ? ' dense' : '');
     $('#bg').style.backgroundImage = 'none';
 
     const svg = $('#slices');
@@ -212,6 +217,7 @@
         <stop offset="1" stop-color="${d.accent}" stop-opacity=".46"/></radialGradient></defs>`;
     let labels = '';
     const labelRad = (R + r) / 2 + 4;
+    root.setProperty('--lw', Math.min(112, Math.round((TAU * labelRad) / n - 10)) + 'px');
 
     d.presets.forEach((p, i) => {
       const mid = i * step;
@@ -221,7 +227,7 @@
       st.offsets.push([ox, oy, lx, ly]);
       html += `<g class="slice" data-i="${i}"><path d="${slicePath(R, r, a0, a1, 3)}"/></g>`;
       labels += `<div class="label${p.icon ? '' : ' noicon'}" data-i="${i}" style="transform:translate(${lx}px,${ly}px);--d:${90 + i * 28}ms">
-          ${n <= 9 ? `<span class="num">${i + 1}</span>` : ''}
+          <span class="num">${i < 9 ? i + 1 : 0}</span>
           ${p.icon ? `<span class="ico">${esc(p.icon)}</span>` : ''}
           <span class="txt">${esc(p.label)}</span></div>`;
     });
@@ -262,33 +268,22 @@
       l.classList.add('on'); l.style.transform = `translate(${lx + ox}px,${ly + oy}px)`;
     }
     setHub(i);
-    tw.hover(i);
   }
 
-  // Direction is measured from where the cursor was when the wheel opened,
-  // so a quick flick works even if the wheel had to shift away from a screen edge.
-  function track(x, y) {
-    const dx = x - st.start.x, dy = y - st.start.y;
+  // Hover comes from the main process, which tracks the real cursor.
+  tw.onTrack(({ i, ang }) => {
+    if (!st || st.closing) return;
     const ptr = $('#pointer');
-    if (Math.hypot(dx, dy) < st.dead) { ptr.classList.remove('on'); setHover(-1); return; }
-    let ang = Math.atan2(dx, -dy);
-    if (ang < 0) ang += TAU;
-    ptr.classList.add('on');
-    ptr.style.transform = `rotate(${ang}rad)`;
-    setHover(Math.floor(((ang + st.step / 2) % TAU) / st.step));
-  }
+    if (ang === null) ptr.classList.remove('on');
+    else { ptr.classList.add('on'); ptr.style.transform = `rotate(${ang}rad)`; }
+    setHover(i);
+  });
 
-  window.addEventListener('mousemove', (e) => { if (st && !st.closing) track(e.clientX, e.clientY); });
-
-  // Left click types the slice you're pointing at (clicking the center does nothing).
-  // Right click closes the wheel.
+  // Backup click handling in case the main process can't read the mouse buttons.
   window.addEventListener('mousedown', (e) => {
     if (!st || st.closing) return;
     if (e.button === 2) { st.closing = true; tw.cancel(); return; }
-    if (e.button === 0) {
-      track(e.clientX, e.clientY);
-      if (st.hovered >= 0) { st.closing = true; tw.select(st.hovered); }
-    }
+    if (e.button === 0 && st.hovered >= 0) { st.closing = true; tw.select(st.hovered); }
   });
   window.addEventListener('contextmenu', (e) => e.preventDefault());
 
